@@ -43,6 +43,8 @@ export type SessionEndUpdate = {
 
 interface UseSpeechRecognitionOptions {
   enabled: boolean
+  listening: boolean
+  autoRestart?: boolean
   onTranscript?: (update: TranscriptUpdate) => void
   onSessionEnd?: (update: SessionEndUpdate) => void
 }
@@ -51,6 +53,8 @@ const RESTART_DELAY_MS = 500
 
 export function useSpeechRecognition({
   enabled,
+  listening,
+  autoRestart = false,
   onTranscript,
   onSessionEnd,
 }: UseSpeechRecognitionOptions) {
@@ -61,6 +65,7 @@ export function useSpeechRecognition({
   const onTranscriptRef = useRef(onTranscript)
   const onSessionEndRef = useRef(onSessionEnd)
   const enabledRef = useRef(enabled)
+  const listeningRef = useRef(listening)
   const shouldRestartRef = useRef(false)
   const sessionFinalRef = useRef('')
   const restartTimeoutRef = useRef<number | null>(null)
@@ -77,6 +82,10 @@ export function useSpeechRecognition({
     enabledRef.current = enabled
   }, [enabled])
 
+  useEffect(() => {
+    listeningRef.current = listening
+  }, [listening])
+
   const clearRestartTimeout = useCallback(() => {
     if (restartTimeoutRef.current !== null) {
       window.clearTimeout(restartTimeoutRef.current)
@@ -84,7 +93,7 @@ export function useSpeechRecognition({
     }
   }, [])
 
-  const stop = useCallback(() => {
+  const stopHard = useCallback(() => {
     shouldRestartRef.current = false
     clearRestartTimeout()
     recognitionRef.current?.abort()
@@ -93,12 +102,30 @@ export function useSpeechRecognition({
     setIsListening(false)
   }, [clearRestartTimeout])
 
+  const stopGracefully = useCallback(() => {
+    shouldRestartRef.current = false
+    clearRestartTimeout()
+
+    if (!recognitionRef.current) {
+      setIsListening(false)
+      return
+    }
+
+    try {
+      recognitionRef.current.stop()
+    } catch {
+      recognitionRef.current.abort()
+      recognitionRef.current = null
+      setIsListening(false)
+    }
+  }, [clearRestartTimeout])
+
   const scheduleRestart = useCallback(
     (recognition: SpeechRecognitionInstance) => {
       clearRestartTimeout()
       restartTimeoutRef.current = window.setTimeout(() => {
         restartTimeoutRef.current = null
-        if (!enabledRef.current || !shouldRestartRef.current) return
+        if (!enabledRef.current || !listeningRef.current || !shouldRestartRef.current) return
         if (recognitionRef.current !== recognition) return
 
         sessionFinalRef.current = ''
@@ -145,7 +172,7 @@ export function useSpeechRecognition({
           shouldRestartRef.current = false
           setIsListening(false)
         } else if (event.error === 'network') {
-          // Erreur passagère : l'écoute redémarre souvent tout seule
+          // Erreur passagère
         } else if (event.error !== 'aborted' && event.error !== 'no-speech') {
           setError(`Erreur micro : ${event.error}`)
         }
@@ -160,8 +187,15 @@ export function useSpeechRecognition({
         }
         sessionFinalRef.current = ''
 
-        if (enabledRef.current && shouldRestartRef.current && recognitionRef.current === recognition) {
+        if (
+          enabledRef.current &&
+          listeningRef.current &&
+          shouldRestartRef.current &&
+          recognitionRef.current === recognition
+        ) {
           scheduleRestart(recognition)
+        } else {
+          recognitionRef.current = null
         }
       }
     },
@@ -185,7 +219,7 @@ export function useSpeechRecognition({
 
     setError(null)
     sessionFinalRef.current = ''
-    shouldRestartRef.current = true
+    shouldRestartRef.current = autoRestart
 
     const recognition = new Ctor()
     recognition.lang = 'fr-FR'
@@ -199,24 +233,35 @@ export function useSpeechRecognition({
       setIsListening(true)
     } catch {
       shouldRestartRef.current = false
+      recognitionRef.current = null
       setError('Impossible de démarrer le micro')
     }
-  }, [attachHandlers, clearRestartTimeout])
+  }, [attachHandlers, autoRestart, clearRestartTimeout])
 
   useEffect(() => {
-    if (enabled && isSupported) {
+    if (!enabled || !isSupported) {
+      stopHard()
+      return
+    }
+
+    if (listening) {
       queueMicrotask(() => {
-        startRecognition()
+        if (enabledRef.current && listeningRef.current) {
+          startRecognition()
+        }
       })
-    } else {
-      stop()
+      return
     }
 
+    stopGracefully()
+  }, [enabled, listening, isSupported, startRecognition, stopGracefully, stopHard])
+
+  useEffect(() => {
     return () => {
-      stop()
+      stopHard()
     }
-  }, [enabled, isSupported, startRecognition, stop])
+  }, [stopHard])
 
-  return { isListening, isSupported, error, stop, start: startRecognition }
+  return { isListening, isSupported, error, stop: stopHard, start: startRecognition }
 }
 

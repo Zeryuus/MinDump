@@ -2,21 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { createNote } from '../services/notesDb'
-import {
-  getDefaultCaptureMode,
-  setDefaultCaptureMode,
-  type CaptureMode,
-} from '../utils/captureMode'
 import { appendVoiceChunk, joinVoiceParts } from '../utils/appendVoiceChunk'
 import { extractSaveCommand } from '../utils/voiceSave'
 
 export default function CapturePage() {
-  const [mode, setMode] = useState<CaptureMode>(() => getDefaultCaptureMode())
-  const [defaultMode, setDefaultModeState] = useState<CaptureMode>(() => getDefaultCaptureMode())
   const [content, setContent] = useState('')
-  const [showSettings, setShowSettings] = useState(false)
   const [saveFlash, setSaveFlash] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isTalking, setIsTalking] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastVoiceSaveRef = useRef(0)
   const skipSessionMergeRef = useRef(false)
@@ -99,16 +92,15 @@ export default function CapturePage() {
   }, [])
 
   const { isListening, isSupported, error: speechError } = useSpeechRecognition({
-    enabled: mode === 'voice',
+    enabled: true,
+    listening: isTalking,
     onTranscript: handleTranscript,
     onSessionEnd: handleSessionEnd,
   })
 
   useEffect(() => {
-    if (mode === 'text') {
-      focusTextarea()
-    }
-  }, [mode, focusTextarea])
+    focusTextarea()
+  }, [focusTextarea])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -122,93 +114,14 @@ export default function CapturePage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleManualSave])
 
-  const switchMode = (next: CaptureMode) => {
-    setMode(next)
-    if (next === 'text') {
-      focusTextarea()
-    }
-  }
-
   return (
     <div className={`page capture-page ${saveFlash ? 'capture-page--saved' : ''}`}>
       <header className="page-header capture-page__header">
         <h1 className="page-title">Capture</h1>
-        <button
-          type="button"
-          className="btn-icon capture-page__settings"
-          aria-label="Préférences"
-          onClick={() => setShowSettings((value) => !value)}
-        >
-          ⚙
-        </button>
-      </header>
-
-      {showSettings && (
-        <div className="settings-panel">
-          <p className="settings-label">Ouvrir par défaut en :</p>
-          <div className="mode-toggle">
-            <button
-              type="button"
-              className={`mode-toggle__btn ${defaultMode === 'text' ? 'mode-toggle__btn--active' : ''}`}
-              onClick={() => {
-                setDefaultCaptureMode('text')
-                setDefaultModeState('text')
-              }}
-            >
-              Texte
-            </button>
-            <button
-              type="button"
-              className={`mode-toggle__btn ${defaultMode === 'voice' ? 'mode-toggle__btn--active' : ''}`}
-              onClick={() => {
-                setDefaultCaptureMode('voice')
-                setDefaultModeState('voice')
-              }}
-            >
-              Vocal
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="capture-mode-block">
         <Link to="/flux" className="btn-link capture-flux-link">
           Voir le flux
         </Link>
-        <div className="mode-switch">
-          <button
-            type="button"
-            className={`mode-switch__btn ${mode === 'text' ? 'mode-switch__btn--active' : ''}`}
-            onClick={() => switchMode('text')}
-          >
-            Texte
-          </button>
-          <button
-            type="button"
-            className={`mode-switch__btn ${mode === 'voice' ? 'mode-switch__btn--active' : ''}`}
-            onClick={() => switchMode('voice')}
-          >
-            Vocal
-          </button>
-        </div>
-      </div>
-
-      {mode === 'voice' && (
-        <div className="voice-status">
-          {!isSupported && (
-            <span className="voice-status__warn">
-              Reconnaissance vocale non disponible sur ce navigateur
-            </span>
-          )}
-          {speechError && <span className="voice-status__warn">{speechError}</span>}
-          {isListening && isSupported && (
-            <span className="voice-status__listening">
-              <span className="pulse-dot" aria-hidden="true" />
-              Écoute en cours…
-            </span>
-          )}
-        </div>
-      )}
+      </header>
 
       <div className="capture-editor">
         <textarea
@@ -220,10 +133,18 @@ export default function CapturePage() {
             baseContentRef.current = event.target.value
           }}
           placeholder="Une idée…"
-          autoFocus={mode === 'text'}
+          autoFocus
           aria-label="Contenu de la note"
         />
       </div>
+
+      {(speechError || !isSupported) && (
+        <p className="capture-voice-hint" role="status">
+          {!isSupported
+            ? 'Reconnaissance vocale non disponible sur ce navigateur'
+            : speechError}
+        </p>
+      )}
 
       <div className="capture-actions">
         <button
@@ -234,6 +155,29 @@ export default function CapturePage() {
         >
           Enregistrer
         </button>
+        {isSupported && (
+          <button
+            type="button"
+            className={`ptt-button ${isTalking ? 'ptt-button--active' : ''}`}
+            aria-pressed={isTalking}
+            aria-label="Maintenez pour parler"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              setIsTalking(true)
+            }}
+            onPointerUp={() => setIsTalking(false)}
+            onPointerLeave={() => setIsTalking(false)}
+            onPointerCancel={() => setIsTalking(false)}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            <span className="ptt-button__icon" aria-hidden="true">
+              🎙
+            </span>
+            <span className="ptt-button__label">
+              {isListening ? 'Écoute…' : 'Parler'}
+            </span>
+          </button>
+        )}
       </div>
     </div>
   )
