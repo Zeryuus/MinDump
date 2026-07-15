@@ -7,6 +7,7 @@ import {
   setDefaultCaptureMode,
   type CaptureMode,
 } from '../utils/captureMode'
+import { appendVoiceChunk } from '../utils/appendVoiceChunk'
 import { extractSaveCommand } from '../utils/voiceSave'
 
 export default function CapturePage() {
@@ -61,14 +62,16 @@ export default function CapturePage() {
 
   const handleTranscript = useCallback(
     ({ finalChunk, interimChunk }: { finalChunk: string; interimChunk: string }) => {
-      const combined = [baseContentRef.current, finalChunk].filter(Boolean).join(' ')
-      const display = [combined, interimChunk].filter(Boolean).join(' ')
+      const committed = finalChunk
+        ? appendVoiceChunk(baseContentRef.current, finalChunk)
+        : baseContentRef.current
+      const display = [committed, interimChunk].filter(Boolean).join(' ')
       setContent(display)
 
       if (!finalChunk) return
 
-      baseContentRef.current = combined
-      const { content: cleaned, shouldSave } = extractSaveCommand(combined)
+      baseContentRef.current = committed
+      const { content: cleaned, shouldSave } = extractSaveCommand(committed)
 
       if (shouldSave) {
         const now = Date.now()
