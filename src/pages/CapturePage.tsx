@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { createNote } from '../services/notesDb'
-import { appendVoiceChunk, joinVoiceParts } from '../utils/appendVoiceChunk'
+import { appendVoiceChunk, buildVoiceDisplay, joinVoiceParts } from '../utils/appendVoiceChunk'
 import { extractSaveCommand } from '../utils/voiceSave'
 
 export default function CapturePage() {
@@ -13,6 +13,7 @@ export default function CapturePage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastVoiceSaveRef = useRef(0)
   const skipSessionMergeRef = useRef(false)
+  const pendingSessionRef = useRef('')
   const baseContentRef = useRef('')
 
   const focusTextarea = useCallback(() => {
@@ -24,6 +25,7 @@ export default function CapturePage() {
   const resetCapture = useCallback(() => {
     setContent('')
     baseContentRef.current = ''
+    pendingSessionRef.current = ''
     focusTextarea()
   }, [focusTextarea])
 
@@ -56,11 +58,12 @@ export default function CapturePage() {
 
   const handleTranscript = useCallback(
     ({ sessionFinal, interimChunk }: { sessionFinal: string; interimChunk: string }) => {
-      const activeNote = joinVoiceParts(baseContentRef.current, sessionFinal)
-      setContent(joinVoiceParts(activeNote, interimChunk))
+      pendingSessionRef.current = sessionFinal
+      setContent(buildVoiceDisplay(baseContentRef.current, sessionFinal, interimChunk))
 
       if (!sessionFinal) return
 
+      const activeNote = joinVoiceParts(baseContentRef.current, sessionFinal)
       const { content: cleaned, shouldSave } = extractSaveCommand(activeNote)
 
       if (shouldSave) {
@@ -72,6 +75,7 @@ export default function CapturePage() {
           const saved = await saveNote(cleaned)
           if (saved) {
             skipSessionMergeRef.current = true
+            pendingSessionRef.current = ''
           }
         })()
       }
@@ -80,12 +84,17 @@ export default function CapturePage() {
   )
 
   const handleSessionEnd = useCallback(({ sessionFinal }: { sessionFinal: string }) => {
+    pendingSessionRef.current = ''
+
     if (skipSessionMergeRef.current) {
       skipSessionMergeRef.current = false
       return
     }
 
-    if (!sessionFinal) return
+    if (!sessionFinal) {
+      setContent(baseContentRef.current)
+      return
+    }
 
     baseContentRef.current = appendVoiceChunk(baseContentRef.current, sessionFinal)
     setContent(baseContentRef.current)
