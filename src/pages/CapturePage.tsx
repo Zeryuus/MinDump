@@ -7,7 +7,7 @@ import {
   setDefaultCaptureMode,
   type CaptureMode,
 } from '../utils/captureMode'
-import { appendVoiceChunk } from '../utils/appendVoiceChunk'
+import { appendVoiceChunk, joinVoiceParts } from '../utils/appendVoiceChunk'
 import { extractSaveCommand } from '../utils/voiceSave'
 
 export default function CapturePage() {
@@ -19,6 +19,7 @@ export default function CapturePage() {
   const [isSaving, setIsSaving] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const lastVoiceSaveRef = useRef(0)
+  const skipSessionMergeRef = useRef(false)
   const baseContentRef = useRef('')
 
   const focusTextarea = useCallback(() => {
@@ -61,17 +62,13 @@ export default function CapturePage() {
   }, [content, saveNote])
 
   const handleTranscript = useCallback(
-    ({ finalChunk, interimChunk }: { finalChunk: string; interimChunk: string }) => {
-      const committed = finalChunk
-        ? appendVoiceChunk(baseContentRef.current, finalChunk)
-        : baseContentRef.current
-      const display = [committed, interimChunk].filter(Boolean).join(' ')
-      setContent(display)
+    ({ sessionFinal, interimChunk }: { sessionFinal: string; interimChunk: string }) => {
+      const activeNote = joinVoiceParts(baseContentRef.current, sessionFinal)
+      setContent(joinVoiceParts(activeNote, interimChunk))
 
-      if (!finalChunk) return
+      if (!sessionFinal) return
 
-      baseContentRef.current = committed
-      const { content: cleaned, shouldSave } = extractSaveCommand(committed)
+      const { content: cleaned, shouldSave } = extractSaveCommand(activeNote)
 
       if (shouldSave) {
         const now = Date.now()
@@ -81,7 +78,7 @@ export default function CapturePage() {
         void (async () => {
           const saved = await saveNote(cleaned)
           if (saved) {
-            baseContentRef.current = ''
+            skipSessionMergeRef.current = true
           }
         })()
       }
@@ -89,9 +86,22 @@ export default function CapturePage() {
     [saveNote],
   )
 
+  const handleSessionEnd = useCallback(({ sessionFinal }: { sessionFinal: string }) => {
+    if (skipSessionMergeRef.current) {
+      skipSessionMergeRef.current = false
+      return
+    }
+
+    if (!sessionFinal) return
+
+    baseContentRef.current = appendVoiceChunk(baseContentRef.current, sessionFinal)
+    setContent(baseContentRef.current)
+  }, [])
+
   const { isListening, isSupported, error: speechError } = useSpeechRecognition({
     enabled: mode === 'voice',
-    onFinalTranscript: handleTranscript,
+    onTranscript: handleTranscript,
+    onSessionEnd: handleSessionEnd,
   })
 
   useEffect(() => {
