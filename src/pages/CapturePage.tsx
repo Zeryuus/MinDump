@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition'
 import { createNote } from '../services/notesDb'
@@ -16,18 +16,12 @@ export default function CapturePage() {
   const pendingSessionRef = useRef('')
   const baseContentRef = useRef('')
 
-  const focusTextarea = useCallback(() => {
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus()
-    })
-  }, [])
-
   const resetCapture = useCallback(() => {
     setContent('')
     baseContentRef.current = ''
     pendingSessionRef.current = ''
-    focusTextarea()
-  }, [focusTextarea])
+    textareaRef.current?.blur()
+  }, [])
 
   const triggerSaveFlash = useCallback(() => {
     setSaveFlash(true)
@@ -108,10 +102,6 @@ export default function CapturePage() {
   })
 
   useEffect(() => {
-    focusTextarea()
-  }, [focusTextarea])
-
-  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
         event.preventDefault()
@@ -122,6 +112,16 @@ export default function CapturePage() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleManualSave])
+
+  const startTalking = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    textareaRef.current?.blur()
+    setIsTalking(true)
+  }, [])
+
+  const stopTalking = useCallback(() => {
+    setIsTalking(false)
+  }, [])
 
   return (
     <div className={`page capture-page ${saveFlash ? 'capture-page--saved' : ''}`}>
@@ -142,7 +142,7 @@ export default function CapturePage() {
             baseContentRef.current = event.target.value
           }}
           placeholder="Une idée…"
-          autoFocus
+          enterKeyHint="done"
           aria-label="Contenu de la note"
         />
       </div>
@@ -170,13 +170,10 @@ export default function CapturePage() {
             className={`ptt-button ${isTalking ? 'ptt-button--active' : ''}`}
             aria-pressed={isTalking}
             aria-label="Maintenez pour parler"
-            onPointerDown={(event) => {
-              event.preventDefault()
-              setIsTalking(true)
-            }}
-            onPointerUp={() => setIsTalking(false)}
-            onPointerLeave={() => setIsTalking(false)}
-            onPointerCancel={() => setIsTalking(false)}
+            onPointerDown={startTalking}
+            onPointerUp={stopTalking}
+            onPointerLeave={stopTalking}
+            onPointerCancel={stopTalking}
             onContextMenu={(event) => event.preventDefault()}
           >
             <span className="ptt-button__icon" aria-hidden="true">
